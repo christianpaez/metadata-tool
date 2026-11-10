@@ -1,0 +1,16 @@
+# Compiled binaries
+bin/
+tmp/
+
+# Air live-reload temporary files
+.air.toml.cache
+
+# Environment variables
+.env
+.env.*
+
+# OS files
+.DS_Store
+
+# Temporary uploaded files (for testing)
+*.tmp

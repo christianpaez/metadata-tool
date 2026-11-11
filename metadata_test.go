@@ -1,11 +1,14 @@
 package main
 
 import (
-	"os"
-	"testing"
-
+	"bytes"
 	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"testing"
 
 	"github.com/barasher/go-exiftool"
 )
@@ -131,5 +134,66 @@ func TestWriteImageMetadata(t *testing.T) {
 	}
 	if readBack.Model != "Virtual Camera" {
 		t.Errorf("expected camera Model 'Virtual Camera' to be preserved, got %q", readBack.Model)
+	}
+}
+
+func TestHandleEdit_UploadsAndModifiesImage(t *testing.T) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	writer.WriteField("artist", "Some artist")
+	writer.WriteField("title", "Some title")
+
+	part, err := writer.CreateFormFile("file", "photo.jpg")
+	if err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+
+	fixture, err := os.Open("testdata/synthetic.jpg")
+	if err != nil {
+		t.Fatalf("failed to open fixture: %v", err)
+	}
+	defer fixture.Close()
+	io.Copy(part, fixture)
+
+	writer.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/edit", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rr := httptest.NewRecorder()
+
+	handleEdit(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	disp := rr.Header().Get("Content-Disposition")
+	if disp != `attachment; filename="photo.jpg"` {
+		t.Errorf("unexpected Content-Disposition: %q", disp)
+	}
+
+	downloadedFile := filepath.Join(t.TempDir(), "downloaded.jpg")
+	os.WriteFile(downloadedFile, rr.Body.Bytes(), 0644)
+
+	et, err := exiftool.NewExiftool()
+	if err != nil {
+		t.Fatalf("failed to init exiftool: %v", err)
+	}
+	defer et.Close()
+
+	meta, err := ReadImageMetadata(et, downloadedFile)
+	if err != nil {
+		t.Fatalf("failed to read back image metadata: %v", err)
+	}
+
+	if meta.Artist != "Some artist" {
+		t.Errorf("expected Artist 'Some artist', got %q", meta.Artist)
+	}
+	if meta.Title != "Some title" {
+		t.Errorf("expected Title 'Some title', got %q", meta.Title)
+	}
+	if meta.Model != "Virtual Camera" {
+		t.Errorf("expected camera Model 'Virtual Camera' to be preserved, got %q", meta.Model)
 	}
 }

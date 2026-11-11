@@ -59,3 +59,49 @@ func ReadImageMetadata(et *exiftool.Exiftool, filePath string) (*Metadata, error
 
 	return meta, nil
 }
+func WriteAudioMetadata(filePath string, meta *Metadata) error {
+	tag, err := id3v2.Open(filePath, id3v2.Options{Parse: true})
+	if err != nil {
+		return fmt.Errorf("failed to open mp3 for writing: %w", err)
+	}
+	defer tag.Close()
+
+	tag.SetVersion(3)
+	tag.SetDefaultEncoding(id3v2.EncodingISO)
+	if meta.Artist != "" {
+		tag.SetArtist(meta.Artist)
+	}
+	if meta.Title != "" {
+		tag.SetTitle(meta.Title)
+	}
+	if meta.Album != "" {
+		tag.SetAlbum(meta.Album)
+	}
+	if meta.Year != "" {
+		tag.SetYear(meta.Year)
+	}
+	if err := tag.Save(); err != nil {
+		return fmt.Errorf("failed to save mp3 tags: %w", err)
+	}
+	return nil
+}
+func WriteImageMetadata(et *exiftool.Exiftool, filePath string, meta *Metadata) error {
+	fileInfos := et.ExtractMetadata(filePath)
+	if len(fileInfos) == 0 {
+		return fmt.Errorf("no metadata found for %s", filePath)
+	}
+	fileInfo := fileInfos[0]
+	fileInfo.Err = nil
+
+	if meta.Artist != "" {
+		fileInfo.SetString("Artist", meta.Artist)
+	}
+	if meta.Title != "" {
+		fileInfo.SetString("ImageDescription", meta.Title)
+	}
+	et.WriteMetadata([]exiftool.FileMetadata{fileInfo})
+	if fileInfo.Err != nil {
+		return fmt.Errorf("exiftool failed to write metadata: %w", fileInfo.Err)
+	}
+	return nil
+}

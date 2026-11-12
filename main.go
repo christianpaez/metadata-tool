@@ -22,6 +22,55 @@ func getPort() string {
 	return port
 }
 
+func showHandler(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(50 << 20); err != nil {
+		http.Error(w, "file too large", http.StatusBadRequest)
+		return
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing 'file' input", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	tempFile, err := os.CreateTemp("", "upload-view-*"+ext)
+	if err != nil {
+		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+	if _, err := io.Copy(tempFile, file); err != nil {
+		http.Error(w, "failed to save upload: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tempFile.Close()
+	var meta *Metadata
+	var readErr error
+	if ext == ".mp3" || ext == ".mpeg" {
+		meta, readErr = ReadAudioMetadata(tempPath)
+	} else {
+		et, err := exiftool.NewExiftool()
+		if err != nil {
+			http.Error(w, "failed to init exiftool: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer et.Close()
+		meta, readErr = ReadImageMetadata(et, tempPath)
+	}
+	if readErr != nil {
+		http.Error(w, "failed to read metadata: "+readErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(w, "File Type: %s\n", meta.FileType)
+	fmt.Fprintf(w, "Artist: %s\n", meta.Artist)
+	fmt.Fprintf(w, "Title: %s\n", meta.Title)
+	fmt.Fprintf(w, "Album: %s\n", meta.Album)
+	fmt.Fprintf(w, "Year: %s\n", meta.Year)
+	fmt.Fprintf(w, "Camera Model: %s\n", meta.Model)
+}
 func handleEdit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(50 << 20); err != nil {
 		http.Error(w, "file too large", http.StatusBadRequest)
@@ -40,27 +89,45 @@ func handleEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tempPath := tempFile.Name()
-	defer os.Remove(tempPath)
+	defer os.Remove(tempPath) // ⭐️ Automatically deleted after response completes!
 	if _, err := io.Copy(tempFile, file); err != nil {
 		http.Error(w, "failed to save upload: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	tempFile.Close()
-	meta := &Metadata{
-		Artist: r.FormValue("artist"),
-		Title:  r.FormValue("title"),
+	downloadFilename := header.Filename
+	if ext == ".mp3" || ext == ".mpeg" {
+		meta := &Metadata{
+
+			Artist: r.FormValue("artist"),
+			Title:  r.FormValue("title"),
+			Album:  r.FormValue("album"),
+			Year:   r.FormValue("year"),
+		}
+		if err := WriteAudioMetadata(tempPath, meta); err != nil {
+			http.Error(w, "failed to update audio: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if ext == ".mpeg" {
+			downloadFilename = strings.TrimSuffix(downloadFilename, ext) + ".mp3"
+		}
+	} else {
+		meta := &Metadata{
+			Copyright:   r.FormValue("copyright"),
+			UserComment: r.FormValue("user_comment"),
+		}
+		et, err := exiftool.NewExiftool()
+		if err != nil {
+			http.Error(w, "failed to init exiftool: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer et.Close()
+		if err := WriteImageMetadata(et, tempPath, meta); err != nil {
+			http.Error(w, "failed to update image: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
-	et, err := exiftool.NewExiftool()
-	if err != nil {
-		http.Error(w, "failed to init exiftool: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer et.Close()
-	if err := WriteImageMetadata(et, tempPath, meta); err != nil {
-		http.Error(w, "failed to update image: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", header.Filename))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", downloadFilename))
 	http.ServeFile(w, r, tempPath)
 }
 
@@ -110,6 +177,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/", homeHandler)
+	mux.HandleFunc("/show", showHandler)
 
 	wrappedRouter := LoggingMiddleware(mux)
 	fmt.Printf("Server started on port: %v\n", getPort())

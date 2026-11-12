@@ -9,12 +9,16 @@ import (
 )
 
 type Metadata struct {
-	FileType string `json:"file_type"`
-	Artist   string `json:"artist"`
-	Title    string `json:"title,omitempty"`
-	Album    string `json:"album,omitempty"`
-	Year     string `json:"year,omitempty"`
-	Model    string `json:"model,omitempty"`
+	FileType         string `json:"file_type"`
+	Artist           string `json:"artist"`
+	Title            string `json:"title,omitempty"`
+	Album            string `json:"album,omitempty"`
+	Year             string `json:"year,omitempty"`
+	Model            string `json:"model,omitempty"`              // e.g., "iPhone 13 Pro"
+	DateTimeOriginal string `json:"date_time_original,omitempty"` // e.g., "2026:06:25 14:23:54"
+	ImageSize        string `json:"image_size,omitempty"`         // e.g., "1047x471"
+	Copyright        string `json:"copyright,omitempty"`
+	UserComment      string `json:"user_comment,omitempty"`
 }
 
 func ReadAudioMetadata(filePath string) (*Metadata, error) {
@@ -47,14 +51,23 @@ func ReadImageMetadata(et *exiftool.Exiftool, filePath string) (*Metadata, error
 		FileType: "image",
 	}
 
-	if artist, ok := info.Fields["Artist"].(string); ok {
-		meta.Artist = strings.TrimSpace(artist)
-	}
 	if model, ok := info.Fields["Model"].(string); ok {
 		meta.Model = strings.TrimSpace(model)
 	}
 	if desc, ok := info.Fields["ImageDescription"].(string); ok {
 		meta.Title = strings.TrimSpace(desc)
+	}
+	if date, ok := info.Fields["DateTimeOriginal"].(string); ok {
+		meta.DateTimeOriginal = strings.TrimSpace(date)
+	}
+	if size, ok := info.Fields["ImageSize"].(string); ok {
+		meta.ImageSize = strings.TrimSpace(size)
+	}
+	if copy, ok := info.Fields["Copyright"].(string); ok {
+		meta.Copyright = strings.TrimSpace(copy)
+	}
+	if comment, ok := info.Fields["UserComment"].(string); ok {
+		meta.UserComment = strings.TrimSpace(comment)
 	}
 
 	return meta, nil
@@ -91,13 +104,12 @@ func WriteImageMetadata(et *exiftool.Exiftool, filePath string, meta *Metadata) 
 		return fmt.Errorf("no metadata found for %s", filePath)
 	}
 	fileInfo := fileInfos[0]
-	fileInfo.Err = nil
-
-	if meta.Artist != "" {
-		fileInfo.SetString("Artist", meta.Artist)
+	fileInfo.Err = nil // Reset Err before writing
+	if meta.Copyright != "" {
+		fileInfo.SetString("Copyright", meta.Copyright)
 	}
-	if meta.Title != "" {
-		fileInfo.SetString("ImageDescription", meta.Title)
+	if meta.UserComment != "" {
+		fileInfo.SetString("UserComment", meta.UserComment)
 	}
 	et.WriteMetadata([]exiftool.FileMetadata{fileInfo})
 	if fileInfo.Err != nil {

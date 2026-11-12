@@ -1,1 +1,5 @@
-<input type="file" id="file" name="file" accept="image/png, image/jpeg" />
+<h2>View Existing Metadata</h2>
+<form action="/show" method="POST" enctype="multipart/form-data">
+  <input type="file" name="file" accept="image/png, image/jpeg, audio/mpeg" required />
+  <button type="submit">Read Metadata</button>
+</form>
